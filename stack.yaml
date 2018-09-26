@@ -1,11 +1,4 @@
-resolver: nightly-2017-11-25
+resolver: lts-11.16
 
 packages:
-  - '.'
-  - 'demo/'
-
-extra-deps: []
-
-flags: {}
-
-extra-package-dbs: []
+  - .

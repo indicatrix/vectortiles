@@ -1,11 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE Rank2Types #-}
 
 -- |
 -- Module    : Geography.VectorTile.VectorTile
--- Copyright : (c) Azavea, 2016 - 2017
--- License   : Apache 2
--- Maintainer: Colin Woodbury <cwoodbury@azavea.com>
+-- Copyright : (c) Colin Woodbury 2016 - 2018
+-- License   : BSD3
+-- Maintainer: Colin Woodbury <colingw@gmail.com>
 --
 -- High-level types for representing Vector Tiles.
 
@@ -22,6 +22,7 @@ module Geography.VectorTile.VectorTile
     --
     -- These lenses are written in a generic way to avoid taking a dependency
     -- on one of the lens libraries.
+  , Lens'
   , layers
   , version
   , name
@@ -35,23 +36,31 @@ module Geography.VectorTile.VectorTile
   ) where
 
 import           Control.DeepSeq (NFData)
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.HashMap.Lazy as M
+import           Data.Hashable (Hashable)
 import           Data.Int
-import qualified Data.Map.Lazy as M
-import           Data.Text (Text)
 import qualified Data.Vector as V
+import qualified Data.Vector.Storable as VS
 import           Data.Word
 import           GHC.Generics (Generic)
 import           Geography.VectorTile.Geometry
 
 ---
 
--- | A high-level representation of a Vector Tile. Implemented internally
--- as a `M.Map`, so that access to individual layers can be fast if you
--- know the layer names ahead of time.
-newtype VectorTile = VectorTile { _layers :: M.Map Text Layer } deriving (Eq,Show,Generic)
+-- | Simple Lenses compatible with both lens and microlens.
+type Lens' s a = forall f. Functor f => (a -> f a) -> s -> f s
 
--- | > Lens' VectorTile (Map Text Layer)
-layers :: Functor f => (M.Map Text Layer -> f (M.Map Text Layer)) -> VectorTile -> f VectorTile
+-- | A high-level representation of a Vector Tile. Implemented internally
+-- as a `M.HashMap`, so that access to individual layers can be fast if you
+-- know the layer names ahead of time.
+--
+-- The layer name itself, a lazy `BL.ByteString`, is guaranteed to be UTF-8.
+-- If you wish to convert it to `Data.Text.Lazy.Text`, consider
+-- `Data.Text.Lazy.Encoding.decodeUtf8`.
+newtype VectorTile = VectorTile { _layers :: M.HashMap BL.ByteString Layer } deriving (Eq,Show,Generic)
+
+layers :: Lens' VectorTile (M.HashMap BL.ByteString Layer)
 layers f v = VectorTile <$> f (_layers v)
 {-# INLINE layers #-}
 
@@ -60,41 +69,35 @@ instance NFData VectorTile
 -- | A layer, which could contain any number of `Feature`s of any `Geometry` type.
 -- This codec only respects the canonical three `Geometry` types, and we split
 -- them here explicitely to allow for more fine-grained access to each type.
-data Layer = Layer { _version :: Int  -- ^ The version of the spec we follow. Should always be 2.
-                   , _name :: Text
-                   , _points :: V.Vector (Feature Point)
-                   , _linestrings :: V.Vector (Feature LineString)
-                   , _polygons :: V.Vector (Feature Polygon)
-                   , _extent :: Int  -- ^ Default: 4096
-                   } deriving (Eq,Show,Generic)
+data Layer = Layer { _version     :: Word  -- ^ The version of the spec we follow. Should always be 2.
+                   , _name        :: BL.ByteString
+                   , _points      :: V.Vector (Feature (VS.Vector Point))
+                   , _linestrings :: V.Vector (Feature (V.Vector LineString))
+                   , _polygons    :: V.Vector (Feature (V.Vector Polygon))
+                   , _extent      :: Word  -- ^ Default: 4096
+                   } deriving (Eq, Show, Generic)
 
--- | > Lens' Layer Int
-version :: Functor f => (Int -> f Int) -> Layer -> f Layer
+version :: Lens' Layer Word
 version f l = (\v -> l { _version = v }) <$> f (_version l)
 {-# INLINE version #-}
 
--- | > Lens' Layer Text
-name :: Functor f => (Text -> f Text) -> Layer -> f Layer
+name :: Lens' Layer BL.ByteString
 name f l = (\v -> l { _name = v }) <$> f (_name l)
 {-# INLINE name #-}
 
--- | > Lens' Layer (Vector (Feature Point))
-points :: Functor f => (V.Vector (Feature Point) -> f (V.Vector (Feature Point))) -> Layer -> f Layer
+points :: Lens' Layer (V.Vector (Feature (VS.Vector Point)))
 points f l = (\v -> l { _points = v }) <$> f (_points l)
 {-# INLINE points #-}
 
--- | > Lens' Layer (Vector (Feature LineString)))
-linestrings :: Functor f => (V.Vector (Feature LineString) -> f (V.Vector (Feature LineString))) -> Layer -> f Layer
+linestrings :: Lens' Layer (V.Vector (Feature (V.Vector LineString)))
 linestrings f l = (\v -> l { _linestrings = v }) <$> f (_linestrings l)
 {-# INLINE linestrings #-}
 
--- | > Lens' Layer (Vector (Feature Polygon)))
-polygons :: Functor f => (V.Vector (Feature Polygon) -> f (V.Vector (Feature Polygon))) -> Layer -> f Layer
+polygons :: Lens' Layer (V.Vector (Feature (V.Vector Polygon)))
 polygons f l = (\v -> l { _polygons = v }) <$> f (_polygons l)
 {-# INLINE polygons #-}
 
--- | > Lens' Layer Int
-extent :: Functor f => (Int -> f Int) -> Layer -> f Layer
+extent :: Lens' Layer Word
 extent f l = (\v -> l { _extent = v }) <$> f (_extent l)
 {-# INLINE extent #-}
 
@@ -113,30 +116,30 @@ instance NFData Layer
 --
 -- Note: Each `Geometry` type and their /Multi*/ counterpart are considered
 -- the same thing, as a `V.Vector` of that `Geometry`.
-data Feature g = Feature { _featureId :: Int  -- ^ Default: 0
-                         , _metadata :: M.Map Text Val
-                         , _geometries :: V.Vector g } deriving (Eq,Show,Generic)
+--
+-- Note: The keys to the metadata are `BL.ByteString`, but are guaranteed
+-- to be UTF-8.
+data Feature gs = Feature { _featureId  :: Word  -- ^ Default: 0
+                          , _metadata   :: M.HashMap BL.ByteString Val
+                          , _geometries :: gs } deriving (Eq, Show, Generic)
 
--- | > Lens' (Feature g) Int
-featureId :: Functor f => (Int -> f Int) -> Feature g -> f (Feature g)
+featureId :: Lens' (Feature gs) Word
 featureId f l = (\v -> l { _featureId = v }) <$> f (_featureId l)
 {-# INLINE featureId #-}
 
--- | > Lens' (Feature g) (Map Text Val)
-metadata :: Functor f => (M.Map Text Val -> f (M.Map Text Val)) -> Feature g -> f (Feature g)
+metadata :: Lens' (Feature gs) (M.HashMap BL.ByteString Val)
 metadata f l = (\v -> l { _metadata = v }) <$> f (_metadata l)
 {-# INLINE metadata #-}
 
--- | > Lens' (Feature g) (Vector g)
-geometries :: Functor f => (V.Vector g -> f (V.Vector g)) -> Feature g -> f (Feature g)
+geometries :: Lens' (Feature gs) gs
 geometries f l = (\v -> l { _geometries = v }) <$> f (_geometries l)
 {-# INLINE geometries #-}
 
-instance NFData g => NFData (Feature g)
+instance (NFData gs) => NFData (Feature gs)
 
 -- | Legal Metadata /Value/ types. Note that `S64` are Z-encoded automatically
--- by the underlying "Data.ProtocolBuffers" library.
-data Val = St Text | Fl Float | Do Double | I64 Int64 | W64 Word64 | S64 Int64 | B Bool
-         deriving (Eq,Ord,Show,Generic)
+-- by the underlying "Text.ProtocolBuffers" library.
+data Val = St BL.ByteString | Fl Float | Do Double | I64 Int64 | W64 Word64 | S64 Int64 | B Bool
+         deriving (Eq,Ord,Show,Generic,Hashable)
 
 instance NFData Val

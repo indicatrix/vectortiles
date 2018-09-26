@@ -1,4 +1,5 @@
 py2env/*
 pypyenv/*
 *.tar.gz
-*.stack-work/
+dist/*
+*.prof
