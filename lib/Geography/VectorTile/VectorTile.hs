@@ -1,5 +1,6 @@
-{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric  #-}
+{-# LANGUAGE Rank2Types     #-}
 
 -- |
 -- Module    : Geography.VectorTile.VectorTile
@@ -35,16 +36,15 @@ module Geography.VectorTile.VectorTile
   , geometries
   ) where
 
-import           Control.DeepSeq (NFData)
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.HashMap.Lazy as M
-import           Data.Hashable (Hashable)
+import           Control.DeepSeq               (NFData)
+import qualified Data.ByteString.Lazy          as BL
+import           Data.Hashable                 (Hashable)
+import qualified Data.HashMap.Lazy             as M
 import           Data.Int
-import qualified Data.Vector as V
-import qualified Data.Vector.Storable as VS
+import qualified Data.Sequence                 as S
 import           Data.Word
-import           GHC.Generics (Generic)
 import           Geography.VectorTile.Geometry
+import           GHC.Generics                  (Generic)
 
 ---
 
@@ -71,9 +71,9 @@ instance NFData VectorTile
 -- them here explicitely to allow for more fine-grained access to each type.
 data Layer = Layer { _version     :: Word  -- ^ The version of the spec we follow. Should always be 2.
                    , _name        :: BL.ByteString
-                   , _points      :: V.Vector (Feature (VS.Vector Point))
-                   , _linestrings :: V.Vector (Feature (V.Vector LineString))
-                   , _polygons    :: V.Vector (Feature (V.Vector Polygon))
+                   , _points      :: S.Seq (Feature (S.Seq Point))
+                   , _linestrings :: S.Seq (Feature (S.Seq LineString))
+                   , _polygons    :: S.Seq (Feature (S.Seq Polygon))
                    , _extent      :: Word  -- ^ Default: 4096
                    } deriving (Eq, Show, Generic)
 
@@ -85,15 +85,15 @@ name :: Lens' Layer BL.ByteString
 name f l = (\v -> l { _name = v }) <$> f (_name l)
 {-# INLINE name #-}
 
-points :: Lens' Layer (V.Vector (Feature (VS.Vector Point)))
+points :: Lens' Layer (S.Seq (Feature (S.Seq Point)))
 points f l = (\v -> l { _points = v }) <$> f (_points l)
 {-# INLINE points #-}
 
-linestrings :: Lens' Layer (V.Vector (Feature (V.Vector LineString)))
+linestrings :: Lens' Layer (S.Seq (Feature (S.Seq LineString)))
 linestrings f l = (\v -> l { _linestrings = v }) <$> f (_linestrings l)
 {-# INLINE linestrings #-}
 
-polygons :: Lens' Layer (V.Vector (Feature (V.Vector Polygon)))
+polygons :: Lens' Layer (S.Seq (Feature (S.Seq Polygon)))
 polygons f l = (\v -> l { _polygons = v }) <$> f (_polygons l)
 {-# INLINE polygons #-}
 

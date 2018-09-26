@@ -6,8 +6,9 @@
 
 module Geography.VectorTile.Util where
 
-import qualified Data.Vector.Storable as VS
-import           Geography.VectorTile.Geometry (Point(..))
+import qualified Data.Sequence                 as Seq
+import qualified Data.Vector.Storable          as VS
+import           Geography.VectorTile.Geometry (Point (..))
 
 ---
 
@@ -24,10 +25,10 @@ data Pair = Pair !Int !Int
 --         go !acc (a :<| b :<| cs) = go (acc |> Point (f a) (f b)) cs
 --         go !acc (_ :<| Empty) = acc
 
-pairsWith :: (a -> Int) -> [a] -> VS.Vector Point
-pairsWith f = VS.unfoldr g
-  where g []  = Nothing
-        g [_] = Nothing
+pairsWith :: (a -> Int) -> [a] -> Seq.Seq Point
+pairsWith f = Seq.unfoldr g
+  where g []       = Nothing
+        g [_]      = Nothing
         g (a:b:cs) = Just (Point (f a) (f b), cs)
 
 -- | Flatten a list of pairs. Equivalent to:

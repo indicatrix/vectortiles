@@ -1,5 +1,5 @@
+{-# LANGUAGE DeriveGeneric   #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 -- |
 -- Module    : Geography.VectorTile.Geometry
@@ -19,13 +19,14 @@ module Geography.VectorTile.Geometry
   , distance
   ) where
 
-import           Control.DeepSeq (NFData)
-import           Data.Foldable (foldl')
-import           Data.Semigroup
-import qualified Data.Vector as V
+import           Control.DeepSeq      (NFData)
+import           Data.Foldable        (foldl')
+import qualified Data.Foldable        as Foldable
+import qualified Data.Sequence        as S
+import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
 import           Foreign.Storable
-import           GHC.Generics (Generic)
+import           GHC.Generics         (Generic)
 
 ---
 
@@ -51,7 +52,7 @@ instance NFData Point
 
 -- | /newtype/ compiles away to expose only the `U.Vector` of unboxed `Point`s
 -- at runtime.
-newtype LineString = LineString { lsPoints :: VS.Vector Point } deriving (Eq, Show, Generic)
+newtype LineString = LineString { lsPoints :: S.Seq Point } deriving (Eq, Show, Generic)
 
 instance NFData LineString
 
@@ -60,8 +61,8 @@ instance NFData LineString
 -- VectorTiles require that Polygon exteriors have clockwise winding order,
 -- and that interior holes have counter-clockwise winding order.
 -- These assume that the origin (0,0) is in the *top-left* corner.
-data Polygon = Polygon { polyPoints :: VS.Vector Point
-                       , inner      :: V.Vector Polygon } deriving (Eq, Show, Generic)
+data Polygon = Polygon { polyPoints :: S.Seq Point
+                       , inner      :: S.Seq Polygon } deriving (Eq, Show, Generic)
 
 instance NFData Polygon
 
@@ -75,12 +76,13 @@ area p = surveyor (polyPoints p) + foldl' (\acc i -> acc + area i) 0 (inner p)
 -- considered an Interior Ring.
 --
 -- Assumption: The `V.Vector` given has at least 4 `Point`s.
-surveyor :: VS.Vector Point -> Double
-surveyor v = (/ 2) . fromIntegral . VS.foldl' (+) 0 $ VS.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
-  where v' = VS.init v
-        xs = VS.map x v'
-        yns = VS.map y . VS.tail $ VS.snoc v' (VS.head v')
-        yps = VS.map y . VS.init $ VS.cons (VS.last v') v'
+surveyor :: S.Seq Point -> Double
+surveyor v@(v'@((v'head S.:<| _) S.:|> v'last) S.:|> _) = (/ 2) . fromIntegral . Foldable.foldl' (+) 0 $ S.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
+  where xs = fmap x v'
+        (_ S.:<| tailYns) = (S.|>) v' v'head
+        (initYps S.:|> _) = (S.<|) v'last v'
+        yns = fmap y tailYns
+        yps = fmap y initYps
 
 -- | Euclidean distance.
 distance :: Point -> Point -> Double
