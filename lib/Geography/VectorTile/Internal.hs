@@ -67,14 +67,10 @@ import           Data.List
                                                                                    (unfoldr)
 import           Data.Maybe
                                                                                    (fromJust)
-import           Data.Semigroup                                                   hiding
-                                                                                   (diff)
 import qualified Data.Sequence                                                    as Seq
 import           Data.Text
                                                                                    (Text,
                                                                                    pack)
-import qualified Data.Vector                                                      as V
-import qualified Data.Vector.Storable                                             as VS
 import           Data.Word
 import qualified Geography.VectorTile.Geometry                                    as G
 import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile          as Tile
@@ -180,12 +176,13 @@ instance ProtobufGeom G.Point where
 -- A `MoveTo` with a count of 1, followed by one `LineTo` command with
 -- a count greater than 0.
 instance ProtobufGeom G.LineString where
-  fromCommands cs = evalStateT (V.unfoldrM f cs) (G.Point 0 0)
+  fromCommands cs = evalStateT (unfoldM f cs) (G.Point 0 0)
     where f :: [Command] -> StateT G.Point (Either Text) (Maybe (G.LineString, [Command]))
-          f (MoveTo p : LineTo ps : rs) = do
+          f (MoveTo (headP Seq.:<| _) : LineTo ps : rs) = do
             curr <- get
-            let ls = G.LineString . expand curr $ VS.head p `VS.cons` ps
-            put . VS.last $ G.lsPoints ls
+            let ls = G.LineString . expand curr $ (Seq.<|) headP ps
+                (_ Seq.:|> lastLsPts) = G.lsPoints ls
+            put lastLsPts
             pure $ Just (ls, rs)
           f [] = pure Nothing
           f _  = throwError "LineString decode: Invalid command sequence given."
@@ -193,7 +190,8 @@ instance ProtobufGeom G.LineString where
   toCommands ls = fold $ evalState (traverse f ls) (G.Point 0 0)
     where f (G.LineString ps) = do
             l <- mapM collapse ps
-            pure [ MoveTo (Seq.singleton $ VS.head l), LineTo (VS.tail l) ]
+            let (headL Seq.:<| tailL) = l
+            pure [ MoveTo (Seq.singleton headL), LineTo tailL ]
 
 -- | A valid `RawFeature` of polygons must contain at least one sequence of:
 --
@@ -205,7 +203,7 @@ instance ProtobufGeom G.LineString where
 -- Performs no sanity checks for malformed Interior Rings.
 instance ProtobufGeom G.Polygon where
   fromCommands cs = do
-    polys <- evalStateT (V.unfoldrM f cs) (G.Point 0 0)
+    polys <- evalStateT (unfoldM f cs) (G.Point 0 0)
     pure $ Seq.unfoldr g polys
     where f :: [Command] -> StateT G.Point (Either Text) (Maybe (G.Polygon, [Command]))
           f (MoveTo p : LineTo ps : ClosePath : rs) = do
@@ -221,9 +219,11 @@ instance ProtobufGeom G.Polygon where
           g :: Seq.Seq G.Polygon -> Maybe (G.Polygon, Seq.Seq G.Polygon)
           g v@(h Seq.:<| t)
             | Seq.null v  = Nothing
-              | otherwise = Just (p, v')
-              where p = h { G.inner = is }
-                    (is,v') = Seq.breakl (\i -> G.area i > 0) t
+            | otherwise = Just (p, v')
+            where
+              p = h { G.inner = is }
+              (is,v') = Seq.breakl (\i -> G.area i > 0) t
+          g _ = Nothing
 
   toCommands ps = fold $ evalState (traverse f ps) (G.Point 0 0)
     where f :: G.Polygon -> State G.Point [Command]
@@ -231,6 +231,7 @@ instance ProtobufGeom G.Polygon where
             (h Seq.:<| t) <- mapM collapse p
             let cs = [ MoveTo (Seq.singleton h), LineTo t, ClosePath ]
             fold . (cs :) <$> traverse f (toList i)
+          f _ = pure []
 
 -- | The possible commands, and the values they hold.
 data Command = MoveTo (Seq.Seq G.Point)
@@ -371,7 +372,7 @@ params = foldl' (\acc (G.Point a b) -> acc Seq.|> zig a Seq.|> zig b) Seq.Empty
 
 -- | Expand a pair of diffs from some reference point into that of a `Point` value.
 expand :: G.Point -> Seq.Seq G.Point -> Seq.Seq G.Point
-expand = VS.postscanl' (<>)
+expand curr s = Seq.drop 1 $ Seq.scanl (\(G.Point x y) (G.Point dx dy) -> G.Point (x + dx) (y + dy)) curr s
 
 -- | Collapse a given `Point` into a pair of diffs, relative to
 -- the previous point in the sequence. The reference point is moved
@@ -382,3 +383,11 @@ collapse p = do
   let diff = G.Point (G.x p - G.x curr) (G.y p - G.y curr)
   put p
   pure diff
+
+unfoldM :: Monad m => (s -> m (Maybe (a, s))) -> s -> m (Seq.Seq a)
+unfoldM f s = do
+    mres <- f s
+    case mres of
+        Nothing      -> pure Seq.empty
+        Just (a, s') -> liftM2 (Seq.<|) (return a) (unfoldM f s')
+
