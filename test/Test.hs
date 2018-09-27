@@ -1,19 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeApplications  #-}
 
 module Main where
 
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BL
-import           Data.Foldable (toList)
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Vector.Storable as VS
+import qualified Data.ByteString                  as BS
+import qualified Data.ByteString.Lazy             as BL
+import           Data.Foldable                    (toList)
+import qualified Data.Foldable                    as Foldable
+import qualified Data.Sequence                    as Seq
+import qualified Data.Text                        as T
 import           Geography.VectorTile
-import qualified Geography.VectorTile.Internal as I
+import qualified Geography.VectorTile.Internal    as I
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           Text.ProtocolBuffers.Basic (Utf8(..), defaultValue)
+import           Text.ProtocolBuffers.Basic       (Utf8 (..), defaultValue)
 import           Text.ProtocolBuffers.Reflections (ReflectDescriptor)
 import           Text.ProtocolBuffers.WireMessage (Wire, messageGet)
 
@@ -51,17 +51,17 @@ suite op ls pl rd cl = testGroup "Unit Tests"
   , testGroup "Geometries"
     [ testCase "area" $ area poly @?= 1
     , testCase "surveyor - outer" . assertBool "surveyor outer" $ surveyor (polyPoints poly) > 0
-    , testCase "surveyor - inner" . assertBool "surveyor inner" $ surveyor (VS.reverse $ polyPoints poly) < 0
+    , testCase "surveyor - inner" . assertBool "surveyor inner" $ surveyor (Seq.reverse $ polyPoints poly) < 0
     , testCase "Z-encoding Isomorphism" zencoding
     , testCase "Command Parsing" commandTest
-    , testCase "Polygon Validity" $ VS.head (polyPoints poly) @?= VS.last (polyPoints poly)
+    , testCase "Polygon Validity" $ Seq.index (polyPoints poly) 0 @?= Seq.index (polyPoints poly) (Seq.length (polyPoints poly) - 1)
     , testCase "[Word32] <-> [Command]" commandIso
     , testCase "[Word32] <-> V.Vector Point" pointIso
     , testCase "[Word32] <-> V.Vector LineString" linestringIso
     , testCase "[Word32] <-> V.Vector Polygon (2 solid)" polygonIso
     , testCase "[Word32] <-> V.Vector Polygon (1 holed)" polygonIso2
     , testCase "[Word32] <-> V.Vector Polygon (1 holed, 1 solid)" polygonIso3
-    , testCase "Point Storable Instance" $ VS.toList (VS.fromList [Point 1 2, Point 3 4]) @?= [Point 1 2, Point 3 4]
+    , testCase "Point Storable Instance" $ Foldable.toList (Seq.fromList [Point 1 2, Point 3 4]) @?= [Point 1 2, Point 3 4]
     ]
   ]
 
@@ -76,7 +76,7 @@ testPolygon bs = protobufDecode bs onePolygon
 
 protobufDecode :: (ReflectDescriptor a, Wire a, Eq a, Show a) => BS.ByteString -> a -> Assertion
 protobufDecode bs res = case messageGet $ BL.fromStrict bs of
-                          Left e -> assertFailure e
+                          Left e       -> assertFailure e
                           Right (t, _) -> t @?= res
 
 tileDecode :: BS.ByteString -> Assertion
@@ -84,11 +84,11 @@ tileDecode bs = assertBool "tileDecode" . isRight $ tile bs
 
 isRight :: Either a b -> Bool
 isRight (Right _) = True
-isRight _ = False
+isRight _         = False
 
 fromRight :: Either a b -> b
 fromRight (Right b) = b
-fromRight _ = error "`Left` given to fromRight!"
+fromRight _         = error "`Left` given to fromRight!"
 
 encodeIso :: I.Tile -> Assertion
 encodeIso vt = case I.fromProtobuf vt of
@@ -159,8 +159,8 @@ zencoding = map (I.unzig . I.zig) vs @?= vs
 
 commandTest :: Assertion
 commandTest = I.commands [9,4,4,18,6,4,5,4,15]
-  @?= [ I.MoveTo $ VS.singleton (Point 2 2)
-      , I.LineTo $ VS.fromList [ Point 3 2, Point (-3) 2 ]
+  @?= [ I.MoveTo $ Seq.singleton (Point 2 2)
+      , I.LineTo $ Seq.fromList [ Point 3 2, Point (-3) 2 ]
       , I.ClosePath ]
 
 commandIso :: Assertion
@@ -199,4 +199,4 @@ polygonIso3 = cs' @?= cs
 
 poly :: Polygon
 poly = Polygon ps mempty
-  where ps = VS.fromList [(Point 0 0), (Point 1 0), (Point 1 1), (Point 0 1), (Point 0 0)]
+  where ps = Seq.fromList [(Point 0 0), (Point 1 0), (Point 1 1), (Point 0 1), (Point 0 0)]
