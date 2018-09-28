@@ -181,8 +181,9 @@ instance ProtobufGeom G.LineString where
           f (MoveTo (headP Seq.:<| _) : LineTo ps : rs) = do
             curr <- get
             let ls = G.LineString . expand curr $ (Seq.<|) headP ps
-                (_ Seq.:|> lastLsPts) = G.lsPoints ls
-            put lastLsPts
+            case Seq.viewr (G.lsPoints ls) of
+              Seq.EmptyR         -> put curr
+              _ Seq.:> lastLsPts -> put lastLsPts
             pure $ Just (ls, rs)
           f [] = pure Nothing
           f _  = throwError "LineString decode: Invalid command sequence given."
@@ -190,8 +191,9 @@ instance ProtobufGeom G.LineString where
   toCommands ls = fold $ evalState (traverse f ls) (G.Point 0 0)
     where f (G.LineString ps) = do
             l <- mapM collapse ps
-            let (headL Seq.:<| tailL) = l
-            pure [ MoveTo (Seq.singleton headL), LineTo tailL ]
+            pure $ case Seq.viewl l of
+              Seq.EmptyL         -> []
+              headL Seq.:< tailL -> [ MoveTo (Seq.singleton headL), LineTo tailL ]
 
 -- | A valid `RawFeature` of polygons must contain at least one sequence of:
 --
@@ -207,12 +209,20 @@ instance ProtobufGeom G.Polygon where
     pure $ Seq.unfoldr g polys
     where f :: [Command] -> StateT G.Point (Either Text) (Maybe (G.Polygon, [Command]))
           f (MoveTo p : LineTo ps : ClosePath : rs) = do
-            let (headP Seq.:<| _) = p
             curr <- get
-            let ps' = expand curr $ (Seq.<|) headP ps
-                (headPs' Seq.:<| (_ Seq.:|> lastPs')) = ps'
-            put lastPs'
-            pure $ Just (G.Polygon ((Seq.|>) ps' headPs') mempty, rs)
+            case Seq.viewl p of
+              Seq.EmptyL -> do
+                put curr
+                pure Nothing
+              headP Seq.:< _ -> do
+                let ps' = expand curr $ (Seq.<|) headP ps
+                case Seq.viewr ps' of
+                  Seq.EmptyR       -> put curr
+                  _ Seq.:> lastPs' -> put lastPs'
+                pure $ case Seq.viewl ps' of
+                  Seq.EmptyL       -> Nothing
+                  headPs' Seq.:< _ -> Just (G.Polygon ((Seq.|>) ps' headPs') mempty, rs)
+
           f [] = pure Nothing
           f _  = throwError . pack $ printf "Polygon decode: Invalid command sequence given: %s" (show cs)
 

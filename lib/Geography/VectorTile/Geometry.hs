@@ -19,14 +19,12 @@ module Geography.VectorTile.Geometry
   , distance
   ) where
 
-import           Control.DeepSeq      (NFData)
-import           Data.Foldable        (foldl')
-import qualified Data.Foldable        as Foldable
-import qualified Data.Sequence        as S
-import qualified Data.Vector          as V
-import qualified Data.Vector.Storable as VS
+import           Control.DeepSeq  (NFData)
+import           Data.Foldable    (foldl')
+import qualified Data.Foldable    as Foldable
+import qualified Data.Sequence    as S
 import           Foreign.Storable
-import           GHC.Generics         (Generic)
+import           GHC.Generics     (Generic)
 
 ---
 
@@ -77,7 +75,7 @@ area p = surveyor (polyPoints p) + foldl' (\acc i -> acc + area i) 0 (inner p)
 --
 -- Assumption: The `V.Vector` given has at least 4 `Point`s.
 surveyor :: S.Seq Point -> Double
-surveyor v@(v'@((v'head S.:<| _) S.:|> v'last) S.:|> _) = (/ 2) . fromIntegral . Foldable.foldl' (+) 0 $ S.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
+surveyor (v'@((v'head S.:<| _) S.:|> v'last) S.:|> _) = (/ 2) . fromIntegral . Foldable.foldl' (+) 0 $ S.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
   where xs = fmap x v'
         (_ S.:<| tailYns) = (S.|>) v' v'head
         (initYps S.:|> _) = (S.<|) v'last v'

@@ -7,7 +7,6 @@
 module Geography.VectorTile.Util where
 
 import qualified Data.Sequence                 as Seq
-import qualified Data.Vector.Storable          as VS
 import           Geography.VectorTile.Geometry (Point (..))
 
 ---
