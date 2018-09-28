@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns           #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DuplicateRecordFields  #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE LambdaCase             #-}
+{-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeSynonymInstances   #-}
 
 -- |
 -- Module    : Geography.VectorTile.Internal
@@ -49,32 +49,45 @@ module Geography.VectorTile.Internal
   , unfeats
   ) where
 
-import           Control.Applicative ((<|>))
-import           Control.Monad (void)
+import           Control.Applicative
+                                                                                   ((<|>))
+import           Control.Monad
+                                                                                   (void)
 import           Control.Monad.Trans.State.Strict
 import           Data.Bits
-import qualified Data.ByteString.Lazy as BL
-import           Data.Foldable (fold, foldl', foldlM, toList)
-import qualified Data.HashMap.Strict as M
-import qualified Data.HashSet as HS
+import qualified Data.ByteString.Lazy                                             as BL
+import           Data.Foldable
+                                                                                   (fold,
+                                                                                   foldl',
+                                                                                   foldlM,
+                                                                                   toList)
+import qualified Data.HashMap.Strict                                              as M
+import qualified Data.HashSet                                                     as HS
 import           Data.Int
-import           Data.Maybe (fromJust)
-import           Data.Monoid
-import           Data.Sequence (Seq, (<|), (|>), Seq((:<|)))
-import qualified Data.Sequence as Seq
-import           Data.Text (Text, pack)
-import qualified Data.Vector as V
+import           Data.Maybe
+                                                                                   (fromJust)
+import           Data.Sequence
+                                                                                   (Seq ((:<|)),
+                                                                                   (<|),
+                                                                                   (|>))
+import qualified Data.Sequence                                                    as Seq
+import           Data.Text
+                                                                                   (Text,
+                                                                                   pack)
 import           Data.Word
-import qualified Geography.VectorTile.Geometry as G
-import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile as Tile
-import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Feature as Feature
+import qualified Geography.VectorTile.Geometry                                    as G
+import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile          as Tile
+import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Feature  as Feature
 import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.GeomType as GeomType
-import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Layer as Layer
-import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Value as Value
+import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Layer    as Layer
+import qualified Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile.Value    as Value
 import           Geography.VectorTile.Util
-import qualified Geography.VectorTile.VectorTile as VT
+import qualified Geography.VectorTile.VectorTile                                  as VT
 import           Text.Printf
-import           Text.ProtocolBuffers.Basic (defaultValue, Utf8(..), utf8)
+import           Text.ProtocolBuffers.Basic
+                                                                                   (Utf8 (..),
+                                                                                   defaultValue,
+                                                                                   utf8)
 
 ---
 
@@ -164,16 +177,20 @@ instance ProtobufGeom G.LineString where
   fromCommands cs = evalState (f cs) (G.Point 0 0)
     where f (MoveTo (p :<| Seq.Empty) :<| LineTo ps :<| rs) = do
             curr <- get
-            let ls = G.LineString . expand curr . V.fromList . toList $ p <| ps
-            put . V.last $ G.lsPoints ls
+            let ls = G.LineString . expand' curr $ p <| ps
+            case Seq.viewr (G.lsPoints ls) of
+              Seq.EmptyR         -> put curr -- Don't know if this is correct
+              _ Seq.:> lastLsPts -> put lastLsPts
             fmap (ls <|) <$> f rs
           f Seq.Empty = pure $ Right Seq.Empty
           f _ = pure $ Left "LineString decode: Invalid command sequence given."
 
   toCommands ls = fold $ evalState (traverse f ls) (G.Point 0 0)
     where f (G.LineString ps) = do
-            l <- V.mapM collapse ps
-            pure $ MoveTo (Seq.singleton $ V.head l) <| LineTo (Seq.fromList . V.toList $ V.tail l) <| Seq.Empty
+            l <- mapM collapse ps
+            pure $ case Seq.viewl l of
+              Seq.EmptyL          -> Seq.empty
+              headL Seq.:< tailL  -> MoveTo (Seq.singleton headL) <| LineTo tailL <| Seq.Empty
 
 -- | A valid `RawFeature` of polygons must contain at least one sequence of:
 --
@@ -190,9 +207,11 @@ instance ProtobufGeom G.Polygon where
     pure $ ps' |> p'  -- Include the last Exterior Ring worked on.
     where f (MoveTo (p :<| Seq.Empty) :<| LineTo ps :<| ClosePath :<| rs) = do
             curr <- get
-            let ps' = expand curr . V.fromList . toList $ p <| ps  -- Conversion bottleneck?
-            put $ V.last ps'
-            fmap (G.Polygon (V.snoc ps' $ V.head ps') Seq.Empty <|) <$> f rs
+            let ps' = expand' curr $ p <| ps  -- Conversion bottleneck?
+            case Seq.viewr ps' of
+              Seq.EmptyR         -> put curr
+              (_ Seq.:> lastPs') -> put lastPs'
+            fmap (G.Polygon Seq.Empty Seq.Empty <|) <$> f rs
           f Seq.Empty = pure $ Right Seq.Empty
           f _  = pure . Left . pack $ printf "Polygon decode: Invalid command sequence given: %s" (show cs)
           g acc p | G.area p > 0 = do  -- New external rings.
@@ -205,10 +224,11 @@ instance ProtobufGeom G.Polygon where
 
   toCommands ps = fold $ evalState (traverse f ps) (G.Point 0 0)
     where f :: G.Polygon -> State G.Point (Seq Command)
-          f (G.Polygon p i) = do
-            l <- V.mapM collapse $ V.init p  -- Exclude the final point.
-            let cs = MoveTo (Seq.singleton $ V.head l) <| LineTo (Seq.fromList . V.toList $ V.tail l) <| ClosePath <| Seq.Empty
+          f (G.Polygon (initP Seq.:|> _) i) = do
+            (h Seq.:<| t) <- mapM collapse initP -- Exclude the final point.
+            let cs = MoveTo (Seq.singleton h) <| LineTo t <| ClosePath <| Seq.Empty
             fold . (cs <|) <$> traverse f i
+          f _ = pure Seq.empty
 
 -- | The possible commands, and the values they hold.
 data Command = MoveTo (Seq G.Point)
@@ -339,8 +359,8 @@ params :: Seq G.Point -> Seq Word32
 params = foldl' (\acc (G.Point a b) -> acc |> zig a |> zig b) Seq.Empty
 
 -- | Expand a pair of diffs from some reference point into that of a `Point` value.
-expand :: G.Point -> V.Vector G.Point -> V.Vector G.Point
-expand = V.postscanl' (\(G.Point x y) (G.Point dx dy) -> G.Point (x + dx) (y + dy))
+-- expand :: G.Point -> V.Vector G.Point -> V.Vector G.Point
+-- expand = V.postscanl' (\(G.Point x y) (G.Point dx dy) -> G.Point (x + dx) (y + dy))
 
 -- | `Seq` based version of the above.
 expand' :: G.Point -> Seq G.Point -> Seq G.Point
