@@ -1,10 +1,11 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DeriveGeneric          #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE LambdaCase             #-}
+{-# LANGUAGE OverloadedStrings      #-}
+{-# LANGUAGE QuasiQuotes            #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE TypeSynonymInstances   #-}
 
 -- |
 -- Module    : Geography.VectorTile.Protobuf.Internal
@@ -50,25 +51,26 @@ module Geography.VectorTile.Protobuf.Internal
   , unfeature
   ) where
 
-import           Control.Applicative ((<|>))
-import           Control.DeepSeq (NFData)
+import           Control.Applicative             ((<|>))
+import           Control.DeepSeq                 (NFData)
 import           Control.Monad.Trans.State.Lazy
 import           Data.Bits
-import           Data.Foldable (foldrM, foldlM)
+import           Data.Foldable                   (foldlM, foldrM, toList)
+import           Data.Foldable                   (fold, foldl', foldlM, toList)
 import           Data.Int
-import qualified Data.Map.Lazy as M
-import           Data.Maybe (fromJust)
+import qualified Data.Map.Lazy                   as M
+import           Data.Maybe                      (fromJust)
 import           Data.Monoid
-import           Data.ProtocolBuffers hiding (decode, encode)
-import qualified Data.Set as S
-import           Data.Text (Text, pack)
-import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as U
+import           Data.ProtocolBuffers            hiding (decode, encode)
+import           Data.Sequence                   (Seq ((:<|)), (<|), (|>))
+import qualified Data.Sequence                   as Seq
+import qualified Data.Set                        as S
+import           Data.Text                       (Text, pack)
 import           Data.Word
-import           GHC.Generics (Generic)
-import qualified Geography.VectorTile.Geometry as G
+import qualified Geography.VectorTile.Geometry   as G
 import           Geography.VectorTile.Util
 import qualified Geography.VectorTile.VectorTile as VT
+import           GHC.Generics                    (Generic)
 import           Text.Printf
 
 ---
@@ -113,9 +115,9 @@ instance Protobuffable VT.Layer where
                           , _extent = putField . Just . fromIntegral $ VT._extent l }
     where (ks,vs) = totalMeta (VT._points l) (VT._linestrings l) (VT._polygons l)
           (km,vm) = (M.fromList $ zip ks [0..], M.fromList $ zip vs [0..])
-          fs = V.toList $ V.concat [ V.map (unfeature km vm Point) (VT._points l)
-                                   , V.map (unfeature km vm LineString) (VT._linestrings l)
-                                   , V.map (unfeature km vm Polygon) (VT._polygons l) ]
+          fs = fold [ fmap (unfeature km vm Point) (VT._points l)
+                    , fmap (unfeature km vm LineString) (VT._linestrings l)
+                    , fmap (unfeature km vm Polygon) (VT._polygons l) ]
 
 instance Protobuffable VT.Val where
   fromProtobuf v = mtoe "Value decode: No legal Value type offered" $ fmap VT.St (getField $ _string v)
@@ -144,12 +146,12 @@ instance NFData RawVectorTile
 
 -- | Contains a pseudo-map of metadata, to be shared across all `RawFeature`s
 -- of this `RawLayer`.
-data RawLayer = RawLayer { _version :: Required 15 (Value Word32)
-                         , _name :: Required 1 (Value Text)
+data RawLayer = RawLayer { _version  :: Required 15 (Value Word32)
+                         , _name     :: Required 1 (Value Text)
                          , _features :: Repeated 2 (Message RawFeature)
-                         , _keys :: Repeated 3 (Value Text)
-                         , _values :: Repeated 4 (Message RawVal)
-                         , _extent :: Optional 5 (Value Word32)
+                         , _keys     :: Repeated 3 (Value Text)
+                         , _values   :: Repeated 4 (Message RawVal)
+                         , _extent   :: Optional 5 (Value Word32)
                          } deriving (Generic,Show,Eq)
 
 instance Encode RawLayer
@@ -158,12 +160,12 @@ instance NFData RawLayer
 
 -- | The /Value/ types of metadata fields.
 data RawVal = RawVal { _string :: Optional 1 (Value Text)
-                     , _float :: Optional 2 (Value Float)
+                     , _float  :: Optional 2 (Value Float)
                      , _double :: Optional 3 (Value Double)
-                     , _int64 :: Optional 4 (Value Int64)
+                     , _int64  :: Optional 4 (Value Int64)
                      , _uint64 :: Optional 5 (Value Word64)
-                     , _sint :: Optional 6 (Value (Signed Int64))  -- ^ Z-encoded.
-                     , _bool :: Optional 7 (Value Bool)
+                     , _sint   :: Optional 6 (Value (Signed Int64))  -- ^ Z-encoded.
+                     , _bool   :: Optional 7 (Value Bool)
                      } deriving (Generic,Show,Eq)
 
 instance Encode RawVal
@@ -171,9 +173,9 @@ instance Decode RawVal
 instance NFData RawVal
 
 -- | A set of geometries unified by some theme.
-data RawFeature = RawFeature { _featureId :: Optional 1 (Value Word64)
-                             , _tags :: Packed 2 (Value Word32)
-                             , _geom :: Optional 3 (Enumeration GeomType)
+data RawFeature = RawFeature { _featureId  :: Optional 1 (Value Word64)
+                             , _tags       :: Packed 2 (Value Word32)
+                             , _geom       :: Optional 3 (Enumeration GeomType)
                              , _geometries :: Packed 4 (Value Word32)
                              } deriving (Generic,Show,Eq)
 
@@ -193,18 +195,18 @@ instance NFData GeomType
 -- | Any classical type considered a GIS "geometry". These must be able
 -- to convert between an encodable list of `Command`s.
 class ProtobufGeom g where
-  fromCommands :: [Command] -> Either Text (V.Vector g)
-  toCommands :: V.Vector g -> [Command]
+  fromCommands :: [Command] -> Either Text (Seq g)
+  toCommands :: Seq g -> [Command]
 
 -- | A valid `RawFeature` of points must contain a single `MoveTo` command
 -- with a count greater than 0.
 instance ProtobufGeom G.Point where
-  fromCommands [MoveTo ps] = Right . U.convert $ evalState (U.mapM expand ps) (0,0)
+  fromCommands [MoveTo ps] = Right . convert $ evalState (mapM expand ps) (0,0)
   fromCommands (c:_) = Left . pack $ printf "Invalid command found in Point feature: %s" (show c)
   fromCommands [] = Left "No points given!"
 
   -- | A multipoint geometry must reduce to a single `MoveTo` command.
-  toCommands ps = [MoveTo $ evalState (U.mapM collapse $ U.convert ps) (0,0)]
+  toCommands ps = [MoveTo $ evalState (mapM collapse $ convert ps) (0,0)]
 
 -- | A valid `RawFeature` of linestrings must contain pairs of:
 --
@@ -212,15 +214,17 @@ instance ProtobufGeom G.Point where
 -- a count greater than 0.
 instance ProtobufGeom G.LineString where
   fromCommands cs = evalState (f cs) (0,0)
-    where f (MoveTo p : LineTo ps : rs) = fmap . V.cons <$> ls <*> f rs
-            where ls = G.LineString <$> U.mapM expand (p <> ps)
-          f [] = pure $ Right V.empty
+    where f (MoveTo p : LineTo ps : rs) = fmap . (Seq.<|) <$> ls <*> f rs
+            where ls = G.LineString <$> mapM expand (p <> ps)
+          f [] = pure $ Right Seq.empty
           f _  = pure $ Left "LineString decode: Invalid command sequence given."
 
   toCommands ls = concat $ evalState (mapM f ls) (0,0)
     where f (G.LineString ps) = do
-            l <- U.mapM collapse ps
-            pure [MoveTo . U.singleton $ U.head l, LineTo $ U.tail l]
+             l <- mapM collapse ps
+             pure $ case Seq.viewl l of
+               Seq.EmptyL          -> Seq.empty
+               headL Seq.:< tailL  -> MoveTo (Seq.singleton headL) <| LineTo tailL <| Seq.Empty
 
 -- | A valid `RawFeature` of polygons must contain at least one sequence of:
 --
@@ -232,35 +236,35 @@ instance ProtobufGeom G.LineString where
 -- Performs no sanity checks for malformed Interior Rings.
 instance ProtobufGeom G.Polygon where
   fromCommands cs = do
-    ps <- evalState (f cs) (0,0)
-    let (h,t) = (V.head ps, V.tail ps)
-        (ps',p') = runState (foldlM g V.empty t) h
-    pure $ V.snoc ps' p'  -- Include the last Exterior Ring worked on.
-    where f (MoveTo p : LineTo ps : ClosePath : rs) = do
+    h :<| t <- evalState (f cs) (0,0)
+    let (ps',p') = runState (foldlM g Seq.empty t) h
+    pure (Seq.|> ps' p')  -- Include the last Exterior Ring worked on.
+    where f (MoveTo (p :<| Seq.Empty) :<| LineTo ps :<| ClosePath :<| rs) = do
             curr <- get
-            let h = U.head p
-                here = (G.x h + G.x curr, G.y h + G.y curr)
-            po <- flip U.snoc here <$> U.mapM expand (U.cons h ps)
-            fmap (V.cons (G.Polygon po V.empty)) <$> f rs
-          f [] = pure $ Right V.empty
+            let here = (G.x p + G.x curr, G.y p + G.y curr)
+            po <- flip |> here <$> mapM expand (<| h ps)
+            fmap Seq.<| G.Polygon po Seq.empty <$> f rs
+          f [] = pure $ Right Seq.empty
           f _  = pure . Left . pack $ printf "Polygon decode: Invalid command sequence given: %s" (show cs)
           g acc p | G.area p > 0 = do  -- New external rings.
                       curr <- get
                       put p
-                      pure $ V.snoc acc curr
+                      pure $ acc |> curr
                   | otherwise = do  -- Next internal ring.
-                      modify (\s -> s { G.inner = V.snoc (G.inner s) p })
+                      modify (\s -> s { G.inner = G.inner s |> p })
                       pure acc
 
   toCommands ps = concat $ evalState (mapM f ps) (0,0)
-    where f (G.Polygon p i) = do
-            l <- U.mapM collapse $ U.init p  -- Exclude the final point.
-            let cs = [MoveTo . U.singleton $ U.head l, LineTo $ U.tail l, ClosePath]
-            concat . V.cons cs <$> mapM f i
+    where f :: G.Polygon -> State G.Point (Seq.Seq Command)
+          f (G.Polygon (initP Seq.:|> _) i) = do
+            (h Seq.:<| t) <- mapM collapse initP -- Exclude the final point.
+            let cs = MoveTo (Seq.singleton h) <| LineTo t <| ClosePath <| Seq.Empty
+            fold . (cs <|) <$> traverse f i
+          f _ = pure Seq.empty
 
 -- | The possible commands, and the values they hold.
-data Command = MoveTo (U.Vector (Int,Int))
-             | LineTo (U.Vector (Int,Int))
+data Command = MoveTo (Seq.Seq (Int,Int))
+             | LineTo (Seq.Seq (Int,Int))
              | ClosePath deriving (Eq,Show)
 
 -- | Z-encode a 64-bit Int.
@@ -290,25 +294,28 @@ unparseCmd (cmd,count) = fromIntegral $ (cmd .&. 7) .|. shift count 3
 -- | Attempt to parse a list of Command/Parameter integers, as defined here:
 --
 -- https://github.com/mapbox/vector-tile-spec/tree/master/2.1#43-geometry-encoding
-commands :: [Word32] -> Either Text [Command]
-commands [] = Right []
-commands (n:ns) = parseCmd n >>= f
-  where f (1,count) = do
-          mts <- MoveTo . U.fromList . map (both unzig) <$> pairs (take (count * 2) ns)
-          (mts :) <$> commands (drop (count * 2) ns)
-        f (2,count) = do
-          mts <- LineTo . U.fromList . map (both unzig) <$> pairs (take (count * 2) ns)
-          (mts :) <$> commands (drop (count * 2) ns)
-        f (7,_) = (ClosePath :) <$> commands ns
-        f _ = Left "Sentinel: You should never see this."
+commands :: [Word32] -> [Command]
+commands = unfoldr go
+  where go [] = Nothing
+        go (n : ns) = case unsafeParseCmd n of
+          (1, count) ->
+            let (ls, rs) = splitAt (count * 2) ns
+                mts = MoveTo $ pairsWith unzig ls
+            in Just (mts, rs)
+          (2, count) ->
+            let (ls, rs) = splitAt (count * 2) ns
+                mts = LineTo $ pairsWith unzig ls
+            in Just (mts, rs)
+          (7, _) -> Just (ClosePath, ns)
+          _ -> error "Sentinel: You should never see this."
 
 -- | Convert a list of parsed `Command`s back into their original Command
 -- and Z-encoded Parameter integer forms.
-uncommands :: [Command] -> [Word32]
-uncommands = U.toList . U.concat . map f
-  where f (MoveTo ps) = U.cons (unparseCmd (1, U.length ps)) $ params ps
-        f (LineTo ls) = U.cons (unparseCmd (2, U.length ls)) $ params ls
-        f ClosePath = U.singleton $ unparseCmd (7,1)  -- ClosePath, Count 1.
+uncommands :: [Command] -> Seq.Seq Word32
+uncommands = Seq.fromList >=> f
+  where f (MoveTo ps) = unparseCmd ((1, (Seq.length ps))) Seq.<| params ps
+        f (LineTo ls) = unparseCmd ((2, (Seq.length ls))) Seq.<| params ls
+        f ClosePath   = Seq.singleton $ unparseCmd (7, 1) -- ClosePath, Count 1.
 
 {- FROM PROTOBUF -}
 
@@ -332,22 +339,22 @@ uncommands = U.toList . U.concat . map f
 --
 -- is not possible.
 features :: [Text] -> [RawVal] -> [RawFeature]
-  -> Either Text (V.Vector (VT.Feature G.Point), V.Vector (VT.Feature G.LineString), V.Vector (VT.Feature G.Polygon))
+  -> Either Text (Seq.Seq (VT.Feature G.Point), Seq.Seq (VT.Feature G.LineString), Seq.Seq (VT.Feature G.Polygon))
 features _ _ [] = Left "VectorTile.features: `[RawFeature]` empty"
 features keys vals fs = (,,) <$> ps <*> ls <*> polys
   where -- (_:ps':ls':polys':_) = groupBy sameGeom $ sortOn geomBias fs  -- ok ok ok
-        ps = foldrM f V.empty $ filter (\fe -> getField (_geom fe) == Just Point) fs
-        ls = foldrM f V.empty $ filter (\fe -> getField (_geom fe) == Just LineString) fs
-        polys = foldrM f V.empty $ filter (\fe -> getField (_geom fe) == Just Polygon) fs
+        ps = foldrM f Seq.empty $ filter (\fe -> getField (_geom fe) == Just Point) fs
+        ls = foldrM f Seq.empty $ filter (\fe -> getField (_geom fe) == Just LineString) fs
+        polys = foldrM f Seq.empty $ filter (\fe -> getField (_geom fe) == Just Polygon) fs
 
-        f :: ProtobufGeom g => RawFeature -> V.Vector (VT.Feature g) -> Either Text (V.Vector (VT.Feature g))
+        f :: ProtobufGeom g => RawFeature -> Seq.Seq (VT.Feature g) -> Either Text (Seq.Seq (VT.Feature g))
         f x acc = do
           geos <- commands (getField $ _geometries x) >>= fromCommands
           meta <- getMeta keys vals . getField $ _tags x
           pure $ VT.Feature { VT._featureId = maybe 0 fromIntegral . getField $ _featureId x
                             , VT._metadata = meta
                             , VT._geometries = geos
-                            } `V.cons` acc
+                            } Seq.<| acc
 
 getMeta :: [Text] -> [RawVal] -> [Word32] -> Either Text (M.Map Text VT.Val)
 getMeta keys vals tags = do
@@ -356,12 +363,12 @@ getMeta keys vals tags = do
 
 {- TO PROTOBUF -}
 
-totalMeta :: V.Vector (VT.Feature G.Point) -> V.Vector (VT.Feature G.LineString) -> V.Vector (VT.Feature G.Polygon) -> ([Text], [VT.Val])
+totalMeta :: Seq.Seq (VT.Feature G.Point) -> Seq.Seq (VT.Feature G.LineString) -> Seq.Seq (VT.Feature G.Polygon) -> ([Text], [VT.Val])
 totalMeta ps ls polys = (keys, vals)
   where keys = S.toList . S.unions $ f ps <> f ls <> f polys
         vals = S.toList . S.unions $ g ps <> g ls <> g polys
-        f = V.foldr (\feat acc -> M.keysSet (VT._metadata feat) : acc) []
-        g = V.foldr (\feat acc -> S.fromList (M.elems (VT._metadata feat)) : acc) []
+        f = foldr (\feat acc -> M.keysSet (VT._metadata feat) : acc) []
+        g = foldr (\feat acc -> S.fromList (M.elems (VT._metadata feat)) : acc) []
 
 -- | Encode a high-level `Feature` back into its mid-level `RawFeature` form.
 unfeature :: ProtobufGeom g => M.Map Text Int -> M.Map VT.Val Int -> GeomType -> VT.Feature g -> RawFeature
@@ -369,7 +376,7 @@ unfeature keys vals gt fe = RawFeature
                             { _featureId = putField . Just . fromIntegral $ VT._featureId fe
                             , _tags = putField $ tags fe
                             , _geom = putField $ Just gt
-                            , _geometries = putField . uncommands . toCommands $ VT._geometries fe }
+                            , _geometries = putField . toList . uncommands . toCommands $ VT._geometries fe }
   where tags = unpairs . map f . M.toList . VT._metadata
         f (k,v) = both (fromIntegral . fromJust) (M.lookup k keys, M.lookup v vals)
 
@@ -386,8 +393,11 @@ def = RawVal { _string = putField Nothing
              , _bool   = putField Nothing }
 
 -- | Transform a `V.Vector` of `Point`s into one of Z-encoded Parameter ints.
-params :: U.Vector (Int,Int) -> U.Vector Word32
-params = U.foldr (\(a,b) acc -> U.cons (zig a) $ U.cons (zig b) acc) U.empty
+-- params :: U.Vector (Int,Int) -> U.Vector Word32
+-- params = U.foldr (\(a,b) acc -> U.cons (zig a) $ U.cons (zig b) acc) U.empty
+
+params :: Seq (Int, Int) -> Seq Word32
+params = foldr (\(a,b) acc -> (zig a) <| (zig b) <| acc) Seq.empty
 
 -- | Expand a pair of diffs from some reference point into that
 -- of a `Point` value. The reference point is moved to our new `Point`.

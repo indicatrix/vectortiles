@@ -5,7 +5,7 @@
 -- hash: a7cf2350cc2546b5043c53088ccc309930cc397b83dce26810af202c0420ac8c
 
 name:           vectortiles
-version:        1.2.0.6
+version:        1.5.0
 synopsis:       GIS Vector Tiles, as defined by Mapbox.
 description:    GIS Vector Tiles, as defined by Mapbox.
                 .
@@ -53,7 +53,7 @@ library
   other-modules:
       Paths_vectortiles
   build-depends:
-      base >=4.9 && <4.11
+      base >= 4.8 && < 5
     , bytestring
     , cereal >=0.5 && <0.6
     , containers
@@ -68,7 +68,7 @@ library
 test-suite vectortiles-test
   type: exitcode-stdio-1.0
   build-depends:
-      base >=4.9 && <4.11
+      base >= 4.8 && < 5
     , bytestring
     , cereal >=0.5 && <0.6
     , containers

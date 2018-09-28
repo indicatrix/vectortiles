@@ -1,5 +1,5 @@
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 -- |
 -- Module    : Geography.VectorTile.VectorTile
@@ -34,14 +34,14 @@ module Geography.VectorTile.VectorTile
   , geometries
   ) where
 
-import           Control.DeepSeq (NFData)
+import           Control.DeepSeq               (NFData)
 import           Data.Int
-import qualified Data.Map.Lazy as M
-import           Data.Text (Text)
-import qualified Data.Vector as V
+import qualified Data.Map.Lazy                 as M
+import qualified Data.Sequence                 as Seq
+import           Data.Text                     (Text)
 import           Data.Word
-import           GHC.Generics (Generic)
 import           Geography.VectorTile.Geometry
+import           GHC.Generics                  (Generic)
 
 ---
 
@@ -60,12 +60,12 @@ instance NFData VectorTile
 -- | A layer, which could contain any number of `Feature`s of any `Geometry` type.
 -- This codec only respects the canonical three `Geometry` types, and we split
 -- them here explicitely to allow for more fine-grained access to each type.
-data Layer = Layer { _version :: Int  -- ^ The version of the spec we follow. Should always be 2.
-                   , _name :: Text
-                   , _points :: V.Vector (Feature Point)
-                   , _linestrings :: V.Vector (Feature LineString)
-                   , _polygons :: V.Vector (Feature Polygon)
-                   , _extent :: Int  -- ^ Default: 4096
+data Layer = Layer { _version     :: Int  -- ^ The version of the spec we follow. Should always be 2.
+                   , _name        :: Text
+                   , _points      :: Seq.Seq (Feature Point)
+                   , _linestrings :: Seq.Seq (Feature LineString)
+                   , _polygons    :: Seq.Seq (Feature Polygon)
+                   , _extent      :: Int  -- ^ Default: 4096
                    } deriving (Eq,Show,Generic)
 
 -- | > Lens' Layer Int
@@ -79,17 +79,17 @@ name f l = (\v -> l { _name = v }) <$> f (_name l)
 {-# INLINE name #-}
 
 -- | > Lens' Layer (Vector (Feature Point))
-points :: Functor f => (V.Vector (Feature Point) -> f (V.Vector (Feature Point))) -> Layer -> f Layer
+points :: Functor f => (Seq.Seq (Feature Point) -> f (Seq.Seq (Feature Point))) -> Layer -> f Layer
 points f l = (\v -> l { _points = v }) <$> f (_points l)
 {-# INLINE points #-}
 
 -- | > Lens' Layer (Vector (Feature LineString)))
-linestrings :: Functor f => (V.Vector (Feature LineString) -> f (V.Vector (Feature LineString))) -> Layer -> f Layer
+linestrings :: Functor f => (Seq.Seq (Feature LineString) -> f (Seq.Seq (Feature LineString))) -> Layer -> f Layer
 linestrings f l = (\v -> l { _linestrings = v }) <$> f (_linestrings l)
 {-# INLINE linestrings #-}
 
 -- | > Lens' Layer (Vector (Feature Polygon)))
-polygons :: Functor f => (V.Vector (Feature Polygon) -> f (V.Vector (Feature Polygon))) -> Layer -> f Layer
+polygons :: Functor f => (Seq.Seq (Feature Polygon) -> f (Seq.Seq (Feature Polygon))) -> Layer -> f Layer
 polygons f l = (\v -> l { _polygons = v }) <$> f (_polygons l)
 {-# INLINE polygons #-}
 
@@ -113,9 +113,9 @@ instance NFData Layer
 --
 -- Note: Each `Geometry` type and their /Multi*/ counterpart are considered
 -- the same thing, as a `V.Vector` of that `Geometry`.
-data Feature g = Feature { _featureId :: Int  -- ^ Default: 0
-                         , _metadata :: M.Map Text Val
-                         , _geometries :: V.Vector g } deriving (Eq,Show,Generic)
+data Feature g = Feature { _featureId  :: Int  -- ^ Default: 0
+                         , _metadata   :: M.Map Text Val
+                         , _geometries :: Seq.Seq g } deriving (Eq,Show,Generic)
 
 -- | > Lens' (Feature g) Int
 featureId :: Functor f => (Int -> f Int) -> Feature g -> f (Feature g)
@@ -128,7 +128,7 @@ metadata f l = (\v -> l { _metadata = v }) <$> f (_metadata l)
 {-# INLINE metadata #-}
 
 -- | > Lens' (Feature g) (Vector g)
-geometries :: Functor f => (V.Vector g -> f (V.Vector g)) -> Feature g -> f (Feature g)
+geometries :: Functor f => (Seq.Seq g -> f (Seq.Seq g)) -> Feature g -> f (Feature g)
 geometries f l = (\v -> l { _geometries = v }) <$> f (_geometries l)
 {-# INLINE geometries #-}
 
