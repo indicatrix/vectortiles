@@ -34,7 +34,6 @@ library
   exposed-modules:
       Geography.VectorTile
       Geography.VectorTile.Internal
-  other-modules:
       Geography.VectorTile.Geometry
       Geography.VectorTile.Protobuf.Internal.Vector_tile
       Geography.VectorTile.Protobuf.Internal.Vector_tile.Tile
