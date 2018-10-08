@@ -67,6 +67,7 @@ import           Data.List
                                                                                    (unfoldr)
 import           Data.Maybe
                                                                                    (fromJust)
+import qualified Data.Maybe                                                       as Maybe
 import qualified Data.Sequence                                                    as Seq
 import           Data.Text
                                                                                    (Text,
@@ -232,7 +233,7 @@ instance ProtobufGeom G.Polygon where
             | otherwise = Just (p, v')
             where
               p = h { G.inner = is }
-              (is,v') = Seq.breakl (\i -> G.area i > 0) t
+              (is,v') = Seq.breakl (\i -> Maybe.maybe False (>0) (G.area i)) t
           g _ = Nothing
 
   toCommands ps = fold $ evalState (traverse f ps) (G.Point 0 0)

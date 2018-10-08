@@ -66,24 +66,29 @@ instance NFData Polygon
 
 -- | The area of a `Polygon` is the difference between the areas of its
 -- outer ring and inner rings.
-area :: Polygon -> Double
-area p = surveyor (polyPoints p) + foldl' (\acc i -> acc + area i) 0 (inner p)
+area :: Polygon -> Maybe Double
+area p = fmap sum . sequence $ foldl' (\acc a -> area a : acc) [surveyor $ polyPoints p] (inner p)
 
 -- | The surveyor's formula for calculating the area of a `Polygon`.
 -- If the value reported here is negative, then the `Polygon` should be
 -- considered an Interior Ring.
 --
 -- Assumption: The `V.Vector` given has at least 4 `Point`s.
-surveyor :: S.Seq Point -> Double
-surveyor (v'@((v'head S.:<| _) S.:|> v'last) S.:|> _) = (/ 2) . fromIntegral . Foldable.foldl' (+) 0 $ S.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
-  where xs = fmap x v'
-        (_ S.:<| tailYns) = (S.|>) v' v'head
-        (initYps S.:|> _) = (S.<|) v'last v'
+surveyor :: S.Seq Point -> Maybe Double
+surveyor (v'@((v'head S.:<| _) S.:|> v'last) S.:|> _) =
+  case (v' S.|> v'head, v'last S.<| v') of
+    (S.Empty, _)         -> Nothing
+    (_ S.:<| _, S.Empty) -> Nothing
+    (_ S.:<| tailYns, initYps S.:|> _) ->
+      Just $ (/ 2) . fromIntegral . Foldable.foldl' (+) 0 $ S.zipWith3 (\xn yn yp -> xn * (yn - yp)) xs yns yps
+      where
+        xs = fmap x v'
         yns = fmap y tailYns
         yps = fmap y initYps
+surveyor _ = Nothing
 
 -- | Euclidean distance.
 distance :: Point -> Point -> Double
-distance p1 p2 = sqrt . fromIntegral $ dx ^ 2 + dy ^ 2
+distance p1 p2 = sqrt $ (fromIntegral dx ** 2) + (fromIntegral dy ** 2)
   where dx = x p1 - x p2
         dy = y p1 - y p2
