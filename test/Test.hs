@@ -7,6 +7,7 @@ import qualified Data.ByteString                  as BS
 import qualified Data.ByteString.Lazy             as BL
 import           Data.Foldable                    (toList)
 import qualified Data.Foldable                    as Foldable
+import qualified Data.Maybe                       as Maybe
 import qualified Data.Sequence                    as Seq
 import qualified Data.Text                        as T
 import           Geography.VectorTile
@@ -49,9 +50,9 @@ suite op ls pl rd cl = testGroup "Unit Tests"
       ]
     ]
   , testGroup "Geometries"
-    [ testCase "area" $ area poly @?= 1
-    , testCase "surveyor - outer" . assertBool "surveyor outer" $ surveyor (polyPoints poly) > 0
-    , testCase "surveyor - inner" . assertBool "surveyor inner" $ surveyor (Seq.reverse $ polyPoints poly) < 0
+    [ testCase "area" $ area poly @?= Just 1
+    , testCase "surveyor - outer" . assertBool "surveyor outer" $ Maybe.maybe False (> 0) (surveyor (polyPoints poly))
+    , testCase "surveyor - inner" . assertBool "surveyor inner" $ Maybe.maybe False (< 0) (surveyor (Seq.reverse $ polyPoints poly))
     , testCase "Z-encoding Isomorphism" zencoding
     , testCase "Command Parsing" commandTest
     , testCase "Polygon Validity" $ Seq.index (polyPoints poly) 0 @?= Seq.index (polyPoints poly) (Seq.length (polyPoints poly) - 1)
