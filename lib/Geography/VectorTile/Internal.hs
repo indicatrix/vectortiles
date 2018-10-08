@@ -21,7 +21,7 @@
 module Geography.VectorTile.Internal
   ( -- * Types
     -- ** Protobuf Conversion
-    Protobuf(..)
+    Protobuf
   , Protobuffable(..)
   , ProtobufGeom(..)
     -- ** Decoded Middle-Types
@@ -238,9 +238,12 @@ instance ProtobufGeom G.Polygon where
   toCommands ps = fold $ evalState (traverse f ps) (G.Point 0 0)
     where f :: G.Polygon -> State G.Point [Command]
           f (G.Polygon (p Seq.:|> _) i) = do   -- Exclude the final point.
-            (h Seq.:<| t) <- mapM collapse p
-            let cs = [ MoveTo (Seq.singleton h), LineTo t, ClosePath ]
-            fold . (cs :) <$> traverse f (toList i)
+            x <- mapM collapse p
+            case x of
+              (h Seq.:<| t) -> do
+                let cs = [ MoveTo (Seq.singleton h), LineTo t, ClosePath ]
+                fold . (cs :) <$> traverse f (toList i)
+              _ -> pure []
           f _ = pure []
 
 -- | The possible commands, and the values they hold.
