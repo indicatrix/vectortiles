@@ -29,6 +29,7 @@ module Geography.VectorTile.Internal
   , Layer.Layer(Layer, version, name, features, keys, values, extent)
   , Feature.Feature(..)
   , Value.Value(..)
+  , GeomVec
   , GeomType.GeomType(..)
     -- * Commands
   , Command(..)
